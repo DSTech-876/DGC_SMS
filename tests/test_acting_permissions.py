@@ -3,10 +3,12 @@ acting roles being strictly additive (they must never reduce access)."""
 import io
 from datetime import timedelta
 
+import pytest
+
 from app import db
 from app.models import (
     User, Role, Branch, Permission, ActingRole, Sample, SampleAssignment,
-    jamaica_now, user_permissions,
+    ROLE_INHERENT_PERMISSIONS, jamaica_now, user_permissions,
 )
 from tests.conftest import _create_user, _login
 
@@ -87,6 +89,45 @@ def test_acting_role_never_removes_permissions(app):
         officer = db.session.get(User, officer.id)
         after = set(officer.effective_permissions)
         assert before <= after, 'acting role removed existing permissions'
+
+
+@pytest.mark.parametrize('primary_role', [r for r in Role if r != Role.ADMIN])
+def test_direct_permission_survives_any_acting_role_for_every_primary_role(
+    app, primary_role
+):
+    """For every non-admin primary role, a direct permission grant that is
+    NOT part of that role's inherent set must remain in effective_permissions
+    after ANY acting role is assigned, and must remain honored (not just
+    "present" but actually usable) after re-fetching the user from a fresh
+    session — simulating a brand-new request/login.
+
+    This is the broad regression test requested for the "Additional User
+    Permissions disappear once an Acting Role is assigned" report: it proves
+    EffectivePermissions = PrimaryRolePermissions UNION DirectUserPermissions
+    UNION ActingRolePermissions for the full role matrix, not just one case.
+    """
+    with app.app_context():
+        admin = _create_user(Role.ADMIN, username='admin_matrix')
+        inherent = ROLE_INHERENT_PERMISSIONS.get(primary_role, set())
+        direct_candidates = [p for p in Permission if p not in inherent]
+        if not direct_candidates:
+            pytest.skip('role already has every permission inherently')
+        direct_perm = direct_candidates[0]
+
+        user = _create_user(primary_role, username=f'matrix_{primary_role.name}')
+        _grant(user, direct_perm)
+        assert direct_perm in db.session.get(User, user.id).effective_permissions
+
+        acting_role = next(r for r in Role if r != primary_role)
+        _assign_acting(user, acting_role, admin)
+
+        # Re-fetch as a brand-new ORM instance (simulates a new request).
+        refreshed = db.session.get(User, user.id)
+        assert direct_perm in refreshed.effective_permissions, (
+            f'Direct permission {direct_perm} was suppressed after assigning '
+            f'acting role {acting_role} to a {primary_role} user'
+        )
+        assert refreshed.has_permission(direct_perm)
 
 
 # ---------------------------------------------------------------------------

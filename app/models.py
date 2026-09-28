@@ -589,6 +589,33 @@ class User(UserMixin, db.Model):
 
         return permissions
 
+    def log_permission_resolution(self, logger=None):
+        """Emit a DEBUG-level breakdown of how effective_permissions was
+        resolved for this user, so support/engineering can quickly confirm
+        that direct grants and acting-role grants are both being honored
+        (see the "Effective Permissions" audit requirement: primary role
+        permissions UNION direct user permissions UNION acting role
+        permissions — no source ever overrides another).
+        """
+        log = logger or current_app.logger
+        primary = set()
+        for r in self.roles:
+            primary.update(ROLE_INHERENT_PERMISSIONS.get(r, set()))
+        direct = set(self.permissions)
+        acting = set()
+        for ar in self.active_acting_roles:
+            acting.update(ROLE_INHERENT_PERMISSIONS.get(ar.role, set()))
+        final = self.effective_permissions
+        log.debug(
+            'Permission resolution for user %s: primary_role=%s direct=%s '
+            'acting_role=%s final_effective=%s',
+            self.username,
+            sorted(p.name for p in primary),
+            sorted(p.name for p in direct),
+            sorted(p.name for p in acting),
+            sorted(p.name for p in final),
+        )
+
     def has_permission(self, permission):
         """Return True if the user holds the given permission.
 

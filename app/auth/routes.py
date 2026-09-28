@@ -114,6 +114,10 @@ def login():
             # Store remember-me preference in session so templates can
             # skip the idle-timeout auto-logout for remembered users.
             session['remember_me'] = form.remember_me.data
+            # Debug-log the effective-permission resolution breakdown so any
+            # regression where an acting role suppresses direct/primary
+            # permissions is immediately visible in the logs.
+            user.log_permission_resolution()
             if user.must_change_password:
                 flash('Please change your password before continuing.', 'warning')
                 return redirect(url_for('auth.change_password'))
@@ -552,6 +556,10 @@ def acting_role_assign():
             f'Acting role "{Role[form.role.data].value}" assigned to {target_user.full_name}.',
             'success',
         )
+        # Debug-log the effective-permission breakdown immediately so any
+        # regression where the new acting role suppresses direct/primary
+        # permissions is visible right away, not just at next login.
+        target_user.log_permission_resolution()
         return redirect(url_for('auth.acting_roles_list'))
     return render_template('auth/acting_role_form.html', form=form, title='Assign Acting Role')
 
@@ -584,6 +592,7 @@ def acting_role_revoke(acting_role_id):
         flash(f'An error occurred: {exc}', 'danger')
         return redirect(url_for('auth.acting_roles_list'))
     flash(f'Acting role revoked from {target_user.full_name}.', 'success')
+    target_user.log_permission_resolution()
     return redirect(url_for('auth.acting_roles_list'))
 
 
