@@ -8,7 +8,7 @@ from sqlalchemy.exc import OperationalError
 from app import db
 from app.auth import auth_bp
 from app.forms import LoginForm, UserCreateForm, UserEditForm, ForgotPasswordForm, ResetPasswordForm, ChangePasswordForm, ActingRoleForm
-from app.models import User, Role, Branch, Permission, Notification, SampleHistory, SampleAssignment, Sample, CustomRole, Setting, ActingRole, jamaica_now, AuditLog
+from app.models import User, Role, Branch, Permission, Notification, SampleHistory, SampleAssignment, Sample, CustomRole, Setting, ActingRole, jamaica_now, AuditLog, ROLE_INHERENT_PERMISSIONS
 from app.notifications import send_email
 
 
@@ -593,72 +593,10 @@ def acting_role_revoke(acting_role_id):
 
 # Mapping from Role → set of Permission values that the role inherently has
 # (before any per-user extra grants are applied).  Used for the read-only
-# reference matrix.
-_ROLE_INHERENT_PERMISSIONS: dict[Role, set[Permission]] = {
-    Role.ADMIN: set(Permission),          # Admin has ALL permissions
-    Role.HOD: {
-        Permission.REGISTER_SAMPLE,
-        Permission.EDIT_SAMPLE,
-        Permission.ASSIGN_SAMPLE,
-        Permission.SUBMIT_REPORT,
-        Permission.PRELIMINARY_REVIEW,
-        Permission.TECHNICAL_REVIEW,
-        Permission.HOD_REVIEW,
-        Permission.MULTI_ANALYST_ASSIGN,
-        Permission.COA_DECERTIFY_REISSUE,
-        Permission.OOS_FLAG,
-        Permission.KPI_VIEW,
-        Permission.INVOICE_GENERATE,
-        Permission.MANAGE_DROPDOWNS,
-        Permission.ADD_SUPPORTING_DOCUMENT,
-        Permission.VIEW_ALL_PRELIMINARY_REVIEWS,
-        Permission.MANAGE_PRELIMINARY_REVIEWS,
-    },
-    Role.DEPUTY: {
-        Permission.DEPUTY_REVIEW,
-        Permission.COA_DECERTIFY_REISSUE,
-        Permission.SUBMIT_REPORT,
-        Permission.VIEW_ALL_PRELIMINARY_REVIEWS,
-    },
-    Role.SENIOR_CHEMIST: {
-        Permission.REGISTER_SAMPLE,
-        Permission.EDIT_SAMPLE,
-        Permission.ASSIGN_SAMPLE,
-        Permission.SUBMIT_REPORT,
-        Permission.PRELIMINARY_REVIEW,
-        Permission.TECHNICAL_REVIEW,
-        Permission.MULTI_ANALYST_ASSIGN,
-        Permission.VIEW_TEAM_PRELIMINARY_REVIEWS,
-    },
-    Role.OFFICER: {
-        Permission.REGISTER_SAMPLE,
-        Permission.EDIT_SAMPLE,
-        Permission.ASSIGN_SAMPLE,
-        Permission.SUBMIT_REPORT,
-        Permission.INVOICE_GENERATE,
-        Permission.ADD_SUPPORTING_DOCUMENT,
-    },
-    Role.CHEMIST: {
-        Permission.SUBMIT_REPORT,
-    },
-    Role.GOVT_CHEMIST_ASSISTANT: {
-        Permission.SUBMIT_REPORT,
-        Permission.ADD_SUPPORTING_DOCUMENT,
-    },
-    Role.SUPER_ADMIN: set(Permission),    # SuperAdmin has ALL permissions
-    # Procurement / Stores Management roles — no inherent permissions in the
-    # current sample-management system; their capabilities are reserved for
-    # the procurement module and can be extended here as that module grows.
-    Role.VIEWER: set(),
-    Role.REQUESTOR: set(),
-    Role.DIRECTOR_HRM: set(),
-    Role.DIRECTOR_PROCUREMENT: set(),
-    Role.EVALUATION_COMMITTEE: set(),
-    Role.FINANCE_OFFICER: set(),
-    Role.PROCUREMENT_COMMITTEE: set(),
-    Role.PROCUREMENT_OFFICER: set(),
-    Role.PROPERTY_MANAGEMENT: set(),
-}
+# reference matrix. Defined in app.models as the single source of truth so
+# that both the authorization logic (User.has_permission) and this UI-only
+# reference matrix stay in sync.
+_ROLE_INHERENT_PERMISSIONS: dict[Role, set[Permission]] = ROLE_INHERENT_PERMISSIONS
 
 
 @auth_bp.route('/roles-permissions', methods=['GET', 'POST'])
