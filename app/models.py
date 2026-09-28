@@ -492,7 +492,12 @@ class User(UserMixin, db.Model):
 
     @property
     def permissions(self):
-        """Return the set of explicitly-granted Permission enums for this user."""
+        """Return the set of explicitly-granted Permission enums for this user (Extra Permissions).
+        
+        These are direct permission grants that override role-based restrictions and
+        are honored even when an acting role is assigned. Extra Permissions are an
+        additive layer on top of role-based access control.
+        """
         if self._permissions is not None:
             return self._permissions
         if self.id is None:
@@ -553,12 +558,18 @@ class User(UserMixin, db.Model):
         Effective permissions are the ADDITIVE UNION of every grant source —
         none of these sources ever overwrite, replace, or revoke another:
 
-          - Explicit per-user (direct) permission grants.
+          - Explicit per-user (direct) permission grants (Extra Permissions).
           - Primary role(s) inherent permissions (``ROLE_INHERENT_PERMISSIONS``).
           - Custom-role permissions.
           - Active acting-role(s) inherent permissions.
           - The Admin role's blanket "all permissions" grant (primary or
             acting — ``has_role`` already treats acting roles additively).
+
+        CRITICAL: Extra Permissions (direct grants) override all role-based
+        restrictions. If a user is explicitly granted a permission via Extra
+        Permissions, they have that permission regardless of their primary
+        role's scope or limitations. This applies even when an acting role is
+        assigned.
 
         Acting roles are strictly supplemental: assigning (or revoking) an
         acting role only adds (or removes) that role's own permission set and
@@ -596,6 +607,9 @@ class User(UserMixin, db.Model):
         (see the "Effective Permissions" audit requirement: primary role
         permissions UNION direct user permissions UNION acting role
         permissions — no source ever overrides another).
+
+        Note: Direct grants (Extra Permissions) take precedence and override
+        role-based restrictions. All permission sources are merged additively.
         """
         log = logger or current_app.logger
         primary = set()
@@ -620,10 +634,13 @@ class User(UserMixin, db.Model):
         """Return True if the user holds the given permission.
 
         This checks membership in ``effective_permissions``, the additive
-        union of the user's direct grants, custom roles, active acting
-        roles, and Admin's blanket grant. No single source overrides
-        another — an acting role assignment only adds permissions, it never
-        removes permissions already granted through any other source.
+        union of the user's direct grants (Extra Permissions), custom roles,
+        active acting roles, and Admin's blanket grant. No single source
+        overrides another in the union itself, but Extra Permissions always
+        take precedence when evaluating access control: if an Extra Permission
+        is granted, it overrides role-based restrictions. An acting role
+        assignment only adds permissions, it never removes permissions
+        already granted through any other source.
         """
         return permission in self.effective_permissions
 
