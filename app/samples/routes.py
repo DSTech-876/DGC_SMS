@@ -263,13 +263,15 @@ def sample_list():
 
     # Role-based filtering
     # Officers, Deputies, HOD, and Admins see all samples (no filter).
-    if current_user.has_role(Role.CHEMIST) and not current_user.has_any_role(Role.OFFICER, Role.SENIOR_CHEMIST, Role.DEPUTY, Role.HOD, Role.ADMIN):
+    # Restrictive scoping is driven by PRIMARY roles only: acting roles are
+    # strictly additive and must never narrow what a user could already see.
+    if current_user.has_primary_role(Role.CHEMIST) and not current_user.has_any_role(Role.OFFICER, Role.SENIOR_CHEMIST, Role.DEPUTY, Role.HOD, Role.ADMIN):
         # Chemists see only samples assigned to them
         assigned_ids = db.select(SampleAssignment.sample_id).where(
             SampleAssignment.chemist_id == current_user.id
         ).scalar_subquery()
         query = query.filter(Sample.id.in_(assigned_ids))
-    elif current_user.has_role(Role.SENIOR_CHEMIST) and current_user.branches and not current_user.has_any_role(Role.OFFICER, Role.HOD, Role.ADMIN):
+    elif current_user.has_primary_role(Role.SENIOR_CHEMIST) and current_user.branches and not current_user.has_any_role(Role.OFFICER, Role.DEPUTY, Role.HOD, Role.ADMIN):
         # Senior Chemists see samples in their branch(es)
         query = query.filter(Sample.sample_type.in_(current_user.branches))
 
