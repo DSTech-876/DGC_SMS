@@ -1,6 +1,5 @@
 import time
 from datetime import timedelta
-from urllib.parse import urlparse
 
 from flask import render_template, redirect, url_for, flash, request, current_app, session
 from flask_login import login_user, logout_user, login_required, current_user
@@ -11,19 +10,6 @@ from app.auth import auth_bp
 from app.forms import LoginForm, UserCreateForm, UserEditForm, ForgotPasswordForm, ResetPasswordForm, ChangePasswordForm, ActingRoleForm
 from app.models import User, Role, Branch, Permission, Notification, SampleHistory, SampleAssignment, Sample, CustomRole, Setting, ActingRole, jamaica_now, AuditLog, ROLE_INHERENT_PERMISSIONS
 from app.notifications import send_email
-
-
-def _safe_back_url():
-    """Return the referring page when it is local, else the dashboard.
-
-    Guards against open-redirects via a forged ``Referer`` header.
-    """
-    referrer = request.referrer
-    if referrer:
-        parsed = urlparse(referrer)
-        if not parsed.netloc or parsed.netloc == urlparse(request.host_url).netloc:
-            return referrer
-    return url_for('main.dashboard')
 
 
 def _commit_with_retry(max_attempts=3, base_delay=0.2):
@@ -637,7 +623,7 @@ def acting_role_activate(acting_role_id):
         return redirect(url_for('main.dashboard'))
     if not acting_role.is_available:
         flash('This acting role is not currently available.', 'warning')
-        return redirect(_safe_back_url())
+        return redirect(url_for('main.dashboard'))
 
     for other in current_user.acting_roles:
         other.is_activated = (other.id == acting_role.id)
@@ -662,10 +648,10 @@ def acting_role_activate(acting_role_id):
         db.session.rollback()
         current_app.logger.exception('Failed to activate acting role')
         flash(f'An error occurred: {exc}', 'danger')
-        return redirect(_safe_back_url())
+        return redirect(url_for('main.dashboard'))
     flash(f'You are now acting as {acting_role.role.value}.', 'success')
     current_user.log_permission_resolution()
-    return redirect(_safe_back_url())
+    return redirect(url_for('main.dashboard'))
 
 
 @auth_bp.route('/acting-roles/revert', methods=['POST'])
@@ -675,7 +661,7 @@ def acting_role_revert():
     activated = [ar for ar in current_user.acting_roles if ar.is_activated]
     if not activated:
         flash('You are already using your default role.', 'info')
-        return redirect(_safe_back_url())
+        return redirect(url_for('main.dashboard'))
     for ar in activated:
         ar.is_activated = False
         ar.activated_at = None
@@ -697,10 +683,10 @@ def acting_role_revert():
         db.session.rollback()
         current_app.logger.exception('Failed to revert acting role')
         flash(f'An error occurred: {exc}', 'danger')
-        return redirect(_safe_back_url())
+        return redirect(url_for('main.dashboard'))
     flash('Reverted to your default role.', 'success')
     current_user.log_permission_resolution()
-    return redirect(_safe_back_url())
+    return redirect(url_for('main.dashboard'))
 
 
 # ---------------------------------------------------------------------------
