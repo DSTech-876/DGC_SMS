@@ -519,7 +519,9 @@
                     {% endif %}
                 </li>
                 {% endfor %}
-                {% if current_user.active_acting_roles %}
+                <li><hr class="dropdown-divider my-1"></li>
+                {% endif %}
+                {% if current_user.activated_acting_roles %}
                 <li>
                     <form method="POST" action="{{ url_for('auth.acting_role_revert') }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -528,7 +530,6 @@
                         </button>
                     </form>
                 </li>
-                {% endif %}
                 <li><hr class="dropdown-divider my-1"></li>
                 {% endif %}
                 <li>

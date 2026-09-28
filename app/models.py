@@ -568,6 +568,16 @@ class User(UserMixin, db.Model):
         return [ar for ar in self.acting_roles if ar.is_active]
 
     @property
+    def activated_acting_roles(self):
+        """Return list of acting roles marked as activated, regardless of availability.
+
+        Unlike active_acting_roles, this does not require the role to be currently
+        within its valid date range. Used to display the "Revert to Default Role"
+        button even if an activated role has expired or hasn't started yet.
+        """
+        return [ar for ar in self.acting_roles if ar.is_activated]
+
+    @property
     def available_acting_roles(self):
         """Return acting roles within their date range, activated or not.
 
