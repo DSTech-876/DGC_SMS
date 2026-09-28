@@ -9,6 +9,14 @@
     </a>
 </div>
 
+<div class="alert alert-info">
+    <i class="bi bi-info-circle me-1"></i>
+    Assigning an acting role does not change a user's access on its own. The
+    user must switch into it using the <strong>Act as …</strong> option in their
+    user menu, and can return to their normal access with
+    <strong>Revert to Default Role</strong>.
+</div>
+
 <div class="card">
     <div class="table-responsive">
         <table class="table table-hover mb-0">
@@ -19,6 +27,7 @@
                     <th>Start Date</th>
                     <th>Expiry Date</th>
                     <th>Status</th>
+                    <th>Activation</th>
                     <th>Assigned By</th>
                     <th>Notes</th>
                     <th></th>
@@ -32,16 +41,23 @@
                     <td>{{ ar.start_date.strftime('%Y-%m-%d') }}</td>
                     <td>{{ ar.expiry_date.strftime('%Y-%m-%d') }}</td>
                     <td>
-                        {% if ar.is_active %}
-                        <span class="badge bg-success">Active</span>
+                        {% if ar.is_available %}
+                        <span class="badge bg-success">Available</span>
                         {% else %}
                         <span class="badge bg-secondary">Expired</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if ar.is_active %}
+                        <span class="badge bg-primary">Activated by user</span>
+                        {% else %}
+                        <span class="badge bg-light text-dark border">Not activated</span>
                         {% endif %}
                     </td>
                     <td>{{ ar.assigned_by_user.full_name if ar.assigned_by_user else '—' }}</td>
                     <td>{{ ar.notes or '—' }}</td>
                     <td>
-                        {% if ar.is_active %}
+                        {% if ar.is_available %}
                         <form method="POST" action="{{ url_for('auth.acting_role_revoke', acting_role_id=ar.id) }}"
                               style="display:inline;" onsubmit="return confirm('Revoke this acting role?');">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -54,7 +70,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="8" class="text-center text-muted py-4">No acting roles assigned.</td>
+                    <td colspan="9" class="text-center text-muted py-4">No acting roles assigned.</td>
                 </tr>
                 {% endfor %}
             </tbody>

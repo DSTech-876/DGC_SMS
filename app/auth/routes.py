@@ -1,5 +1,6 @@
 import time
 from datetime import timedelta
+from urllib.parse import urlparse
 
 from flask import render_template, redirect, url_for, flash, request, current_app, session
 from flask_login import login_user, logout_user, login_required, current_user
@@ -10,6 +11,19 @@ from app.auth import auth_bp
 from app.forms import LoginForm, UserCreateForm, UserEditForm, ForgotPasswordForm, ResetPasswordForm, ChangePasswordForm, ActingRoleForm
 from app.models import User, Role, Branch, Permission, Notification, SampleHistory, SampleAssignment, Sample, CustomRole, Setting, ActingRole, jamaica_now, AuditLog, ROLE_INHERENT_PERMISSIONS
 from app.notifications import send_email
+
+
+def _safe_back_url():
+    """Return the referring page when it is local, else the dashboard.
+
+    Guards against open-redirects via a forged ``Referer`` header.
+    """
+    referrer = request.referrer
+    if referrer:
+        parsed = urlparse(referrer)
+        if not parsed.netloc or parsed.netloc == urlparse(request.host_url).netloc:
+            return referrer
+    return url_for('main.dashboard')
 
 
 def _commit_with_retry(max_attempts=3, base_delay=0.2):
@@ -529,9 +543,19 @@ def acting_role_assign():
             start_date=form.start_date.data,
             expiry_date=form.expiry_date.data,
             notes=form.notes.data or None,
+            is_activated=False,
         )
         db.session.add(acting_role)
         target_user = db.get_or_404(User, form.user_id.data)
+        db.session.add(Notification(
+            user_id=target_user.id,
+            title='Acting role assigned',
+            message=(
+                f'You have been assigned the acting role '
+                f'"{Role[form.role.data].value}" (until {form.expiry_date.data}). '
+                'It stays inactive until you switch into it from your user menu.'
+            ),
+        ))
         db.session.add(AuditLog(
             action='ACTING_ROLE_ASSIGNED',
             entity_type='User',
@@ -553,7 +577,9 @@ def acting_role_assign():
             flash(f'An error occurred: {exc}', 'danger')
             return render_template('auth/acting_role_form.html', form=form, title='Assign Acting Role')
         flash(
-            f'Acting role "{Role[form.role.data].value}" assigned to {target_user.full_name}.',
+            f'Acting role "{Role[form.role.data].value}" assigned to '
+            f'{target_user.full_name}. It takes effect only when they switch '
+            'into it from their user menu.',
             'success',
         )
         # Debug-log the effective-permission breakdown immediately so any
@@ -594,6 +620,87 @@ def acting_role_revoke(acting_role_id):
     flash(f'Acting role revoked from {target_user.full_name}.', 'success')
     target_user.log_permission_resolution()
     return redirect(url_for('auth.acting_roles_list'))
+
+
+@auth_bp.route('/acting-roles/<int:acting_role_id>/activate', methods=['POST'])
+@login_required
+def acting_role_activate(acting_role_id):
+    """Switch the current user into one of their assigned acting roles.
+
+    Acting roles are opt-in: they grant nothing until the user activates
+    them here. Activating one acting role deactivates any other, so a user
+    is only ever acting in a single position at a time.
+    """
+    acting_role = db.get_or_404(ActingRole, acting_role_id)
+    if acting_role.user_id != current_user.id:
+        flash('Access denied.', 'danger')
+        return redirect(url_for('main.dashboard'))
+    if not acting_role.is_available:
+        flash('This acting role is not currently available.', 'warning')
+        return redirect(_safe_back_url())
+
+    for other in current_user.acting_roles:
+        other.is_activated = (other.id == acting_role.id)
+        if other.id != acting_role.id:
+            other.activated_at = None
+    acting_role.activated_at = jamaica_now()
+    db.session.add(AuditLog(
+        action='ACTING_ROLE_ACTIVATED',
+        entity_type='User',
+        entity_id=current_user.id,
+        entity_label=current_user.username,
+        details=(
+            f'"{current_user.username}" switched into acting role '
+            f'"{acting_role.role.value}".'
+        ),
+        performed_by=current_user.id,
+        performed_at=jamaica_now(),
+    ))
+    try:
+        _commit_with_retry()
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception('Failed to activate acting role')
+        flash(f'An error occurred: {exc}', 'danger')
+        return redirect(_safe_back_url())
+    flash(f'You are now acting as {acting_role.role.value}.', 'success')
+    current_user.log_permission_resolution()
+    return redirect(_safe_back_url())
+
+
+@auth_bp.route('/acting-roles/revert', methods=['POST'])
+@login_required
+def acting_role_revert():
+    """Revert the current user to their default (primary) role."""
+    activated = [ar for ar in current_user.acting_roles if ar.is_activated]
+    if not activated:
+        flash('You are already using your default role.', 'info')
+        return redirect(_safe_back_url())
+    for ar in activated:
+        ar.is_activated = False
+        ar.activated_at = None
+    db.session.add(AuditLog(
+        action='ACTING_ROLE_REVERTED',
+        entity_type='User',
+        entity_id=current_user.id,
+        entity_label=current_user.username,
+        details=(
+            f'"{current_user.username}" reverted to their default role from '
+            f'acting role(s) {", ".join(sorted(ar.role.value for ar in activated))}.'
+        ),
+        performed_by=current_user.id,
+        performed_at=jamaica_now(),
+    ))
+    try:
+        _commit_with_retry()
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception('Failed to revert acting role')
+        flash(f'An error occurred: {exc}', 'danger')
+        return redirect(_safe_back_url())
+    flash('Reverted to your default role.', 'success')
+    current_user.log_permission_resolution()
+    return redirect(_safe_back_url())
 
 
 # ---------------------------------------------------------------------------

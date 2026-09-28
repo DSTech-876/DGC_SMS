@@ -46,6 +46,9 @@ MIGRATIONS = [
     ('samples', 'certified_by', 'INTEGER REFERENCES users(id)'),
     # users – force password change on first login
     ('users', 'must_change_password', 'BOOLEAN DEFAULT 0'),
+    # acting_roles – opt-in activation switch
+    ('acting_roles', 'is_activated', 'BOOLEAN NOT NULL DEFAULT 0'),
+    ('acting_roles', 'activated_at', 'DATETIME'),
     # users – active flag and creation timestamp
     ('users', 'is_active_user', 'BOOLEAN DEFAULT 1'),
     ('users', 'created_at', 'DATETIME'),
@@ -416,7 +419,9 @@ NEW_TABLES = [
         '  start_date DATE NOT NULL,'
         '  expiry_date DATE NOT NULL,'
         '  notes VARCHAR(500),'
-        '  created_at DATETIME'
+        '  created_at DATETIME,'
+        '  is_activated BOOLEAN NOT NULL DEFAULT 0,'
+        '  activated_at DATETIME'
         ')',
     ),
 ]
