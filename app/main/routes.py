@@ -242,7 +242,10 @@ def dashboard():
     # Trigger reminder check (at most once per day, stored in settings)
     _maybe_send_report_reminders()
 
-    if current_user.has_role(Role.CHEMIST) and not current_user.has_any_role(Role.OFFICER, Role.SENIOR_CHEMIST, Role.DEPUTY, Role.HOD, Role.ADMIN):
+    # Dashboard variants: the restrictive variants below are selected from the
+    # user's PRIMARY roles only — acting roles are additive and must never
+    # drop a user into a more restrictive dashboard/scope.
+    if current_user.has_primary_role(Role.CHEMIST) and not current_user.has_any_role(Role.OFFICER, Role.SENIOR_CHEMIST, Role.DEPUTY, Role.HOD, Role.ADMIN):
         my_assignments = SampleAssignment.query.filter_by(
             chemist_id=current_user.id
         )
@@ -268,7 +271,7 @@ def dashboard():
             ])
         ).count()
 
-    elif current_user.has_role(Role.OFFICER) and not current_user.has_any_role(Role.SENIOR_CHEMIST, Role.DEPUTY, Role.HOD, Role.ADMIN):
+    elif current_user.has_primary_role(Role.OFFICER) and not current_user.has_any_role(Role.SENIOR_CHEMIST, Role.DEPUTY, Role.HOD, Role.ADMIN):
         my_samples = Sample.query.filter_by(uploaded_by=current_user.id)
         stats['total_samples'] = my_samples.count()
         stats['registered'] = my_samples.filter_by(
@@ -297,7 +300,7 @@ def dashboard():
             ])
         ).count()
 
-    elif current_user.has_role(Role.DEPUTY) and not current_user.has_any_role(Role.HOD, Role.ADMIN):
+    elif current_user.has_primary_role(Role.DEPUTY) and not current_user.has_any_role(Role.HOD, Role.ADMIN):
         query = Sample.query
         stats['total_samples'] = query.count()
         stats['deputy_review'] = query.filter_by(
@@ -316,7 +319,7 @@ def dashboard():
             ])
         ).count()
 
-    elif current_user.has_role(Role.GOVT_CHEMIST_ASSISTANT) and not current_user.has_any_role(
+    elif current_user.has_primary_role(Role.GOVT_CHEMIST_ASSISTANT) and not current_user.has_any_role(
             Role.OFFICER, Role.SENIOR_CHEMIST, Role.DEPUTY, Role.HOD, Role.ADMIN):
         query = Sample.query
         stats['total_samples'] = query.count()
@@ -334,7 +337,7 @@ def dashboard():
     else:
         # Branch heads, HOD, Admin
         query = Sample.query
-        if current_user.branches and current_user.has_role(Role.SENIOR_CHEMIST):
+        if current_user.branches and current_user.has_primary_role(Role.SENIOR_CHEMIST) and not current_user.has_any_role(Role.HOD, Role.ADMIN):
             query = query.filter(Sample.sample_type.in_(current_user.branches))
 
         stats['total_samples'] = query.count()
@@ -362,7 +365,7 @@ def dashboard():
             Sample.sample_type.in_(_pharma_branches),
             Sample.status == SampleStatus.REGISTERED,
         )
-        if current_user.has_role(Role.SENIOR_CHEMIST) and not current_user.has_any_role(Role.HOD, Role.ADMIN):
+        if current_user.has_primary_role(Role.SENIOR_CHEMIST) and not current_user.has_any_role(Role.HOD, Role.ADMIN):
             if current_user.branches:
                 _unassigned_q = _unassigned_q.filter(
                     Sample.sample_type.in_(current_user.branches)
@@ -516,7 +519,17 @@ _ASSIGNMENT_COMPLETED_STATUSES = {AssignmentStatus.COMPLETED, AssignmentStatus.A
 
 
 def _is_assignment_supervisor(user):
-    return user.has_any_role(*_ASSIGNMENT_SUPERVISOR_ROLES)
+    """Supervisor access is a UNION of role- and permission-based grants.
+
+    A user qualifies through any supervisor role (primary or acting) OR by
+    holding the ASSIGN_SAMPLE permission from any source (direct grant,
+    custom role, or acting role), so explicit permission grants are honored
+    the same way here as in the rest of the application.
+    """
+    return (
+        user.has_any_role(*_ASSIGNMENT_SUPERVISOR_ROLES)
+        or user.has_permission(Permission.ASSIGN_SAMPLE)
+    )
 
 
 @main_bp.route('/assignments')

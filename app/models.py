@@ -168,7 +168,9 @@ ROLE_INHERENT_PERMISSIONS: dict['Role', set['Permission']] = {
     Role.OFFICER: {
         Permission.REGISTER_SAMPLE,
         Permission.EDIT_SAMPLE,
-        Permission.ASSIGN_SAMPLE,
+        # NOTE: no ASSIGN_SAMPLE — assignment is reserved for Branch Heads
+        # (Senior Chemist / Deputy / HOD) and Admins; officers may only gain
+        # it via an explicit direct grant, custom role, or acting role.
         Permission.SUBMIT_REPORT,
         Permission.INVOICE_GENERATE,
         Permission.ADD_SUPPORTING_DOCUMENT,
@@ -520,6 +522,19 @@ class User(UserMixin, db.Model):
         # Check active acting roles
         return any(ar.role in roles_set and ar.is_active for ar in self.acting_roles)
 
+    def has_primary_role(self, role):
+        """Check only the user's own (primary) roles, ignoring acting roles.
+
+        Use this for RESTRICTIVE branches (e.g. "chemists only see their own
+        samples"): acting roles are strictly additive and must never place a
+        user into a more restrictive scope than their primary role allows.
+        """
+        return role in self.roles
+
+    def has_any_primary_role(self, *roles):
+        """Like :meth:`has_any_role` but ignores acting roles (see above)."""
+        return bool(self.roles & set(roles))
+
     @property
     def active_acting_roles(self):
         """Return list of currently active acting roles."""
@@ -539,6 +554,7 @@ class User(UserMixin, db.Model):
         none of these sources ever overwrite, replace, or revoke another:
 
           - Explicit per-user (direct) permission grants.
+          - Primary role(s) inherent permissions (``ROLE_INHERENT_PERMISSIONS``).
           - Custom-role permissions.
           - Active acting-role(s) inherent permissions.
           - The Admin role's blanket "all permissions" grant (primary or
@@ -553,6 +569,10 @@ class User(UserMixin, db.Model):
 
         # Explicit per-user (direct) permission grants.
         permissions.update(self.permissions)
+
+        # Primary role(s) inherent permissions.
+        for r in self.roles:
+            permissions.update(ROLE_INHERENT_PERMISSIONS.get(r, set()))
 
         # Custom-role grants.
         for cr in self.custom_roles_rel:

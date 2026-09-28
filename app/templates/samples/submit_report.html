@@ -152,7 +152,8 @@
                             {% if assignment.report_file %}
                             <div class="form-text">
                                 Current file: <strong>{{ assignment.report_file_original_name }}</strong>
-                                — uploading a new file will replace it.
+                                — uploading a new file will replace it. Re-using the
+                                same filename is allowed; each upload is stored as a new version.
                             </div>
                             {% endif %}
                         </div>
@@ -317,6 +318,67 @@
 
     applyMode();
     syncIndividualRows();
+
+    // ── Same-filename reupload hardening ──────────────────────────────────
+    // Browsers keep a snapshot reference to the picked file. If the analyst
+    // edits the file on disk AFTER selecting it (common when correcting a
+    // returned report and re-using the same filename), the request is
+    // aborted by the browser (e.g. Chrome's ERR_UPLOAD_FILE_CHANGED) and the
+    // upload appears to be "rejected" until the file is renamed/re-picked.
+    // 1) Reset the input on click so re-picking the same filename always
+    //    takes a fresh snapshot of the current content.
+    // 2) On submit, verify every selected file is still readable; if not,
+    //    ask the user to re-select it instead of failing opaquely.
+    var form = document.querySelector('form[enctype], form');
+    var fileInputs = Array.prototype.slice.call(
+        document.querySelectorAll('input[type="file"]')
+    );
+
+    fileInputs.forEach(function (input) {
+        input.addEventListener('click', function () {
+            // Clearing first guarantees a fresh File handle (and a change
+            // event) even when the same filename is selected again.
+            this.value = '';
+        });
+    });
+
+    var filesVerified = false;
+    if (form) {
+        form.addEventListener('submit', function (e) {
+            if (filesVerified) { filesVerified = false; return; }
+            var selected = fileInputs.filter(function (input) {
+                return input.files && input.files.length > 0 && input.offsetParent !== null;
+            });
+            if (selected.length === 0 || typeof FileReader === 'undefined') return;
+            e.preventDefault();
+            var checks = selected.map(function (input) {
+                return new Promise(function (resolve) {
+                    var reader = new FileReader();
+                    reader.onload = function () { resolve(null); };
+                    reader.onerror = function () { resolve(input); };
+                    reader.readAsArrayBuffer(input.files[0].slice(0, 1));
+                });
+            });
+            Promise.all(checks).then(function (results) {
+                var stale = results.filter(function (r) { return r !== null; });
+                if (stale.length > 0) {
+                    stale.forEach(function (input) { input.value = ''; });
+                    alert(
+                        'The selected report file changed on disk after it was ' +
+                        'chosen. Please re-select the file (the same filename ' +
+                        'is fine) and submit again.'
+                    );
+                    return;
+                }
+                filesVerified = true;
+                if (typeof form.requestSubmit === 'function') {
+                    form.requestSubmit();
+                } else {
+                    form.submit();
+                }
+            });
+        });
+    }
 })();
 </script>
 {% endblock %}
