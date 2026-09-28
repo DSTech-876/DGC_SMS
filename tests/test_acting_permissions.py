@@ -21,16 +21,22 @@ def _grant(user, *permissions):
     db.session.commit()
 
 
-def _assign_acting(user, role, assigned_by):
+def _assign_acting(user, role, assigned_by, activated=True):
+    """Assign an acting role. Acting roles are opt-in, so unless the test
+    wants the dormant state, it is activated here as the user would do via
+    the "Act as …" switch."""
     today = jamaica_now().date()
-    db.session.add(ActingRole(
+    acting = ActingRole(
         user_id=user.id,
         role=role,
         assigned_by=assigned_by.id,
         start_date=today,
         expiry_date=today + timedelta(days=30),
-    ))
+        is_activated=activated,
+    )
+    db.session.add(acting)
     db.session.commit()
+    return acting
 
 
 def _register_sample(client, lab_number='TOX-100', sample_type='TOXICOLOGY'):
@@ -255,3 +261,88 @@ def test_chemist_without_permission_still_analyst_view(app, client):
     data = resp.get_json()
     records = data if isinstance(data, list) else data.get('records', [])
     assert len(records) == 0
+
+
+# ---------------------------------------------------------------------------
+# Acting roles are opt-in: assignment alone changes nothing
+# ---------------------------------------------------------------------------
+
+def test_assigned_acting_role_is_dormant_until_activated(app):
+    """Assigning an acting role must not change access until the user
+    switches into it."""
+    with app.app_context():
+        admin = _create_user(Role.ADMIN, username='admin_opt')
+        chemist = _create_user(Role.CHEMIST, Branch.TOXICOLOGY, username='chem_opt')
+        acting = _assign_acting(chemist, Role.SENIOR_CHEMIST, admin, activated=False)
+
+        assert acting.is_available
+        assert not acting.is_active
+        assert chemist.active_acting_roles == []
+        assert [a.id for a in chemist.available_acting_roles] == [acting.id]
+        assert not chemist.has_role(Role.SENIOR_CHEMIST)
+        assert not chemist.has_permission(Permission.TECHNICAL_REVIEW)
+        # Primary-role permissions are untouched
+        assert chemist.effective_permissions == set(
+            ROLE_INHERENT_PERMISSIONS.get(Role.CHEMIST, set())
+        )
+
+
+def test_activate_route_enables_acting_role_and_revert_restores_default(app, client):
+    with app.app_context():
+        admin = _create_user(Role.ADMIN, username='admin_sw')
+        chemist = _create_user(Role.CHEMIST, Branch.TOXICOLOGY, username='chem_sw')
+        acting = _assign_acting(chemist, Role.SENIOR_CHEMIST, admin, activated=False)
+        acting_id = acting.id
+
+    _login(client, 'chem_sw')
+    resp = client.post(f'/auth/acting-roles/{acting_id}/activate', follow_redirects=True)
+    assert resp.status_code == 200
+    with app.app_context():
+        user = User.query.filter_by(username='chem_sw').first()
+        assert user.has_role(Role.SENIOR_CHEMIST)
+        assert user.has_permission(Permission.TECHNICAL_REVIEW)
+        # Primary role permissions are still present (strictly additive)
+        assert ROLE_INHERENT_PERMISSIONS.get(Role.CHEMIST, set()) <= user.effective_permissions
+
+    resp = client.post('/auth/acting-roles/revert', follow_redirects=True)
+    assert resp.status_code == 200
+    with app.app_context():
+        user = User.query.filter_by(username='chem_sw').first()
+        assert not user.has_role(Role.SENIOR_CHEMIST)
+        assert user.active_acting_roles == []
+        # The assignment itself survives so the user can switch back
+        assert len(user.available_acting_roles) == 1
+
+
+def test_user_cannot_activate_another_users_acting_role(app, client):
+    with app.app_context():
+        admin = _create_user(Role.ADMIN, username='admin_x')
+        other = _create_user(Role.CHEMIST, Branch.TOXICOLOGY, username='chem_x')
+        intruder = _create_user(Role.CHEMIST, Branch.TOXICOLOGY, username='chem_y')
+        acting = _assign_acting(other, Role.SENIOR_CHEMIST, admin, activated=False)
+        acting_id = acting.id
+
+    _login(client, 'chem_y')
+    client.post(f'/auth/acting-roles/{acting_id}/activate', follow_redirects=True)
+    with app.app_context():
+        victim = User.query.filter_by(username='chem_x').first()
+        intruder = User.query.filter_by(username='chem_y').first()
+        assert victim.active_acting_roles == []
+        assert intruder.active_acting_roles == []
+
+
+def test_activating_one_acting_role_deactivates_the_other(app, client):
+    with app.app_context():
+        admin = _create_user(Role.ADMIN, username='admin_two')
+        chemist = _create_user(Role.CHEMIST, Branch.TOXICOLOGY, username='chem_two')
+        first = _assign_acting(chemist, Role.SENIOR_CHEMIST, admin, activated=True)
+        second = _assign_acting(chemist, Role.DEPUTY, admin, activated=False)
+        second_id = second.id
+
+    _login(client, 'chem_two')
+    client.post(f'/auth/acting-roles/{second_id}/activate', follow_redirects=True)
+    with app.app_context():
+        user = User.query.filter_by(username='chem_two').first()
+        active = user.active_acting_roles
+        assert len(active) == 1
+        assert active[0].role == Role.DEPUTY

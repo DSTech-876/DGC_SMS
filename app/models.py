@@ -307,18 +307,40 @@ class ActingRole(db.Model):
     expiry_date = db.Column(db.Date, nullable=False)
     notes = db.Column(db.String(500), nullable=True)
     created_at = db.Column(db.DateTime, default=jamaica_now)
+    # Opt-in switch: an assigned acting role stays dormant until the user
+    # explicitly activates it ("Act as …"). Reverting to the default role
+    # simply clears this flag — the assignment itself is untouched.
+    is_activated = db.Column(db.Boolean, nullable=False, default=False)
+    activated_at = db.Column(db.DateTime, nullable=True)
 
     user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('acting_roles', lazy='selectin'))
     assigned_by_user = db.relationship('User', foreign_keys=[assigned_by])
 
     @property
-    def is_active(self):
-        """Return True if the acting role is currently within its valid date range."""
+    def is_available(self):
+        """Return True if the acting role is currently within its valid date range.
+
+        Availability only means the user *may* switch into this acting role;
+        it does not grant any permission on its own.
+        """
         today = jamaica_now().date()
         return self.start_date <= today <= self.expiry_date
 
+    @property
+    def is_active(self):
+        """Return True if the acting role is available AND the user activated it.
+
+        Only activated acting roles contribute permissions, so assigning an
+        acting role never changes a user's access until they explicitly
+        switch into it.
+        """
+        return self.is_available and bool(self.is_activated)
+
     def __repr__(self):
-        return f'<ActingRole user_id={self.user_id} role={self.role.value} expires={self.expiry_date}>'
+        return (
+            f'<ActingRole user_id={self.user_id} role={self.role.value} '
+            f'expires={self.expiry_date} activated={bool(self.is_activated)}>'
+        )
 
 
 class SampleStatus(enum.Enum):
@@ -517,14 +539,14 @@ class User(UserMixin, db.Model):
     def has_role(self, role):
         if role in self.roles:
             return True
-        # Check active acting roles
+        # Check activated acting roles (dormant assignments are ignored)
         return any(ar.role == role and ar.is_active for ar in self.acting_roles)
 
     def has_any_role(self, *roles):
         roles_set = set(roles)
         if self.roles & roles_set:
             return True
-        # Check active acting roles
+        # Check activated acting roles (dormant assignments are ignored)
         return any(ar.role in roles_set and ar.is_active for ar in self.acting_roles)
 
     def has_primary_role(self, role):
@@ -542,8 +564,16 @@ class User(UserMixin, db.Model):
 
     @property
     def active_acting_roles(self):
-        """Return list of currently active acting roles."""
+        """Return list of acting roles the user has switched into (activated)."""
         return [ar for ar in self.acting_roles if ar.is_active]
+
+    @property
+    def available_acting_roles(self):
+        """Return acting roles within their date range, activated or not.
+
+        These are the roles the user may switch into from the "Act as" menu.
+        """
+        return [ar for ar in self.acting_roles if ar.is_available]
 
     def has_branch(self, branch):
         return branch in self.branches
@@ -561,7 +591,8 @@ class User(UserMixin, db.Model):
           - Explicit per-user (direct) permission grants (Extra Permissions).
           - Primary role(s) inherent permissions (``ROLE_INHERENT_PERMISSIONS``).
           - Custom-role permissions.
-          - Active acting-role(s) inherent permissions.
+          - Activated acting-role(s) inherent permissions (an assigned acting
+            role is dormant until the user switches into it).
           - The Admin role's blanket "all permissions" grant (primary or
             acting — ``has_role`` already treats acting roles additively).
 
@@ -571,10 +602,12 @@ class User(UserMixin, db.Model):
         role's scope or limitations. This applies even when an acting role is
         assigned.
 
-        Acting roles are strictly supplemental: assigning (or revoking) an
-        acting role only adds (or removes) that role's own permission set and
-        never touches permissions granted through any other source (direct
-        grants, custom roles, or the user's primary role).
+        Acting roles are strictly supplemental AND opt-in: merely assigning an
+        acting role changes nothing until the user activates it. Once
+        activated, it only adds that role's own permission set and never
+        touches permissions granted through any other source (direct grants,
+        custom roles, or the user's primary role). Reverting to the default
+        role clears the activation and restores the user's baseline access.
         """
         permissions = set()
 

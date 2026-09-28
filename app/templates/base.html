@@ -500,6 +500,37 @@
                     {% endif %}
                 </li>
                 <li><hr class="dropdown-divider my-1"></li>
+                {% if current_user.available_acting_roles %}
+                <li class="px-3 pt-1"><div class="text-muted text-uppercase" style="font-size:.7rem; letter-spacing:.04em;">Acting Role</div></li>
+                {% for ar in current_user.available_acting_roles %}
+                <li>
+                    {% if ar.is_active %}
+                    <span class="dropdown-item-text d-flex align-items-center justify-content-between">
+                        <span><i class="bi bi-person-badge-fill me-2"></i>Acting as {{ ar.role.value }}</span>
+                        <span class="badge bg-success ms-2">On</span>
+                    </span>
+                    {% else %}
+                    <form method="POST" action="{{ url_for('auth.acting_role_activate', acting_role_id=ar.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="dropdown-item">
+                            <i class="bi bi-person-badge me-2"></i>Act as {{ ar.role.value }}
+                        </button>
+                    </form>
+                    {% endif %}
+                </li>
+                {% endfor %}
+                {% if current_user.active_acting_roles %}
+                <li>
+                    <form method="POST" action="{{ url_for('auth.acting_role_revert') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="dropdown-item">
+                            <i class="bi bi-arrow-counterclockwise me-2"></i>Revert to Default Role
+                        </button>
+                    </form>
+                </li>
+                {% endif %}
+                <li><hr class="dropdown-divider my-1"></li>
+                {% endif %}
                 <li>
                     <a class="dropdown-item" href="{{ url_for('auth.change_password') }}">
                         <i class="bi bi-key me-2"></i>Change Password
