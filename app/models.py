@@ -123,6 +123,80 @@ class Permission(enum.Enum):
 
 
 # ---------------------------------------------------------------------------
+# Role → inherent Permission mapping
+# ---------------------------------------------------------------------------
+# Single source of truth for the set of Permission values a Role inherently
+# carries (before any per-user or acting-role extra grants are applied). Used
+# by User.effective_permissions/has_permission() for authorization, and by the
+# read-only Roles & Permissions reference matrix in the Admin UI.
+ROLE_INHERENT_PERMISSIONS: dict['Role', set['Permission']] = {
+    Role.ADMIN: set(Permission),          # Admin has ALL permissions
+    Role.HOD: {
+        Permission.REGISTER_SAMPLE,
+        Permission.EDIT_SAMPLE,
+        Permission.ASSIGN_SAMPLE,
+        Permission.SUBMIT_REPORT,
+        Permission.PRELIMINARY_REVIEW,
+        Permission.TECHNICAL_REVIEW,
+        Permission.HOD_REVIEW,
+        Permission.MULTI_ANALYST_ASSIGN,
+        Permission.COA_DECERTIFY_REISSUE,
+        Permission.OOS_FLAG,
+        Permission.KPI_VIEW,
+        Permission.INVOICE_GENERATE,
+        Permission.MANAGE_DROPDOWNS,
+        Permission.ADD_SUPPORTING_DOCUMENT,
+        Permission.VIEW_ALL_PRELIMINARY_REVIEWS,
+        Permission.MANAGE_PRELIMINARY_REVIEWS,
+    },
+    Role.DEPUTY: {
+        Permission.DEPUTY_REVIEW,
+        Permission.COA_DECERTIFY_REISSUE,
+        Permission.SUBMIT_REPORT,
+        Permission.VIEW_ALL_PRELIMINARY_REVIEWS,
+    },
+    Role.SENIOR_CHEMIST: {
+        Permission.REGISTER_SAMPLE,
+        Permission.EDIT_SAMPLE,
+        Permission.ASSIGN_SAMPLE,
+        Permission.SUBMIT_REPORT,
+        Permission.PRELIMINARY_REVIEW,
+        Permission.TECHNICAL_REVIEW,
+        Permission.MULTI_ANALYST_ASSIGN,
+        Permission.VIEW_TEAM_PRELIMINARY_REVIEWS,
+    },
+    Role.OFFICER: {
+        Permission.REGISTER_SAMPLE,
+        Permission.EDIT_SAMPLE,
+        Permission.ASSIGN_SAMPLE,
+        Permission.SUBMIT_REPORT,
+        Permission.INVOICE_GENERATE,
+        Permission.ADD_SUPPORTING_DOCUMENT,
+    },
+    Role.CHEMIST: {
+        Permission.SUBMIT_REPORT,
+    },
+    Role.GOVT_CHEMIST_ASSISTANT: {
+        Permission.SUBMIT_REPORT,
+        Permission.ADD_SUPPORTING_DOCUMENT,
+    },
+    Role.SUPER_ADMIN: set(Permission),    # SuperAdmin has ALL permissions
+    # Procurement / Stores Management roles — no inherent permissions in the
+    # current sample-management system; their capabilities are reserved for
+    # the procurement module and can be extended here as that module grows.
+    Role.VIEWER: set(),
+    Role.REQUESTOR: set(),
+    Role.DIRECTOR_HRM: set(),
+    Role.DIRECTOR_PROCUREMENT: set(),
+    Role.EVALUATION_COMMITTEE: set(),
+    Role.FINANCE_OFFICER: set(),
+    Role.PROCUREMENT_COMMITTEE: set(),
+    Role.PROCUREMENT_OFFICER: set(),
+    Role.PROPERTY_MANAGEMENT: set(),
+}
+
+
+# ---------------------------------------------------------------------------
 # Many-to-many association tables for User ↔ Role / Branch / Permission
 # ---------------------------------------------------------------------------
 
@@ -457,29 +531,54 @@ class User(UserMixin, db.Model):
     def has_any_branch(self, *branches):
         return bool(self.branches & set(branches))
 
+    @property
+    def effective_permissions(self):
+        """Return the full set of Permission enums this user effectively holds.
+
+        Effective permissions are the ADDITIVE UNION of every grant source —
+        none of these sources ever overwrite, replace, or revoke another:
+
+          - Explicit per-user (direct) permission grants.
+          - Custom-role permissions.
+          - Active acting-role(s) inherent permissions.
+          - The Admin role's blanket "all permissions" grant (primary or
+            acting — ``has_role`` already treats acting roles additively).
+
+        Acting roles are strictly supplemental: assigning (or revoking) an
+        acting role only adds (or removes) that role's own permission set and
+        never touches permissions granted through any other source (direct
+        grants, custom roles, or the user's primary role).
+        """
+        permissions = set()
+
+        # Explicit per-user (direct) permission grants.
+        permissions.update(self.permissions)
+
+        # Custom-role grants.
+        for cr in self.custom_roles_rel:
+            permissions.update(cr.permissions)
+
+        # Active acting-role(s) inherent permissions — additive only; never
+        # removes or replaces permissions granted through any other source.
+        for ar in self.active_acting_roles:
+            permissions.update(ROLE_INHERENT_PERMISSIONS.get(ar.role, set()))
+
+        # Admins (primary or acting) implicitly hold every permission.
+        if self.has_role(Role.ADMIN):
+            permissions.update(Permission)
+
+        return permissions
+
     def has_permission(self, permission):
         """Return True if the user holds the given permission.
 
-        Authorization flow (explicit grants take precedence over roles):
-          1. Check explicit user permission grants first — a permission an
-             admin has manually enabled for this user always wins, regardless
-             of what the user's role(s) would otherwise allow.
-          2. Check permissions granted through the user's custom roles.
-          3. Fall back to role-based access (the Admin role implies every
-             permission).
-          4. Otherwise, deny.
+        This checks membership in ``effective_permissions``, the additive
+        union of the user's direct grants, custom roles, active acting
+        roles, and Admin's blanket grant. No single source overrides
+        another — an acting role assignment only adds permissions, it never
+        removes permissions already granted through any other source.
         """
-        # 1. Explicit per-user grant — highest precedence.
-        if permission in self.permissions:
-            return True
-        # 2. Custom-role grant.
-        if any(permission in cr.permissions for cr in self.custom_roles_rel):
-            return True
-        # 3. Role-based fallback: Admins implicitly hold all permissions.
-        if self.has_role(Role.ADMIN):
-            return True
-        # 4. No grant found — deny.
-        return False
+        return permission in self.effective_permissions
 
     @property
     def role_names(self):
