@@ -526,6 +526,23 @@ def notify_certificate_signed(sample, action):
     create_notification(sample.uploaded_by, title, message, link)
 
 
+def notify_marked_out_of_spec(sample):
+    """Called when a certified sample is flagged as out-of-spec after signing."""
+    title = f'Sample Marked Out of Spec: {sample.lab_number}'
+    message = (
+        f'Certified sample "{sample.sample_name}" (Lab# {sample.lab_number}) '
+        f'has been marked as OUT OF SPECIFICATION by '
+        f'{sample.oos_marker.full_name if sample.oos_marker else "a reviewer"}.'
+    )
+    if sample.oos_mark_reason:
+        message += f'\n\nReason: {sample.oos_mark_reason}'
+    link = f'/samples/{sample.id}'
+
+    notify_branch_heads(sample.sample_type, title, message, link,
+                         exclude_user_id=sample.marked_oos_by)
+    create_notification(sample.uploaded_by, title, message, link)
+
+
 def notify_assignment_removed(chemist_id, sample_ref, test_name, removed_by, sample_id):
     """Notify the removed assignee when an assignment is removed."""
     from app.models import jamaica_now

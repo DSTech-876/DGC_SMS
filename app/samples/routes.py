@@ -32,6 +32,7 @@ from app.forms import (
     SampleImageForm,
     DeleteRequestForm, COADecertifyForm, COAReissueForm,
     InvoiceCreateForm, InvoiceItemForm,
+    MarkOutOfSpecForm,
     BRANCH_TEST_NAMES, BRANCH_TEST_REFERENCES,
 )
 from app.notifications import (
@@ -42,6 +43,7 @@ from app.notifications import (
     notify_certificate_signed, notify_assignment_removed,
     notify_backdate_request_submitted,
     notify_delete_request_submitted,
+    notify_marked_out_of_spec,
 )
 
 
@@ -3683,6 +3685,70 @@ def coa_reissue(sample_id):
         form.coa_reference.data = sample.coa_reference
 
     return render_template('samples/coa_reissue.html', form=form, sample=sample)
+
+
+# ---------------------------------------------------------------------------
+# Post-Certification Out-of-Spec Marking
+# ---------------------------------------------------------------------------
+
+def _can_mark_oos(user):
+    """Return True if user is authorised to mark a certified sample OOS.
+
+    Permission-based: available to HOD, Deputy, or Senior Chemist by role,
+    or to any user explicitly granted Permission.OOS_FLAG.
+    """
+    return (
+        user.has_any_role(Role.HOD, Role.DEPUTY, Role.SENIOR_CHEMIST, Role.ADMIN)
+        or user.has_permission(Permission.OOS_FLAG)
+    )
+
+
+@samples_bp.route('/<int:sample_id>/mark-out-of-spec', methods=['GET', 'POST'])
+@login_required
+def mark_out_of_spec(sample_id):
+    """Flag a certified sample as out-of-spec (HOD / Deputy / Senior Chemist)."""
+    sample = db.get_or_404(Sample, sample_id)
+    if not _can_mark_oos(current_user):
+        flash('Access denied. Only HOD, Deputy, or Senior Chemist can mark a '
+              'sample as out of spec.', 'danger')
+        return redirect(url_for('samples.detail', sample_id=sample_id))
+
+    if sample.status != SampleStatus.CERTIFIED:
+        flash('Only certified samples can be marked as out of spec.', 'warning')
+        return redirect(url_for('samples.detail', sample_id=sample_id))
+
+    if sample.marked_oos_at:
+        flash('This sample has already been marked as out of spec.', 'info')
+        return redirect(url_for('samples.detail', sample_id=sample_id))
+
+    form = MarkOutOfSpecForm()
+    if form.validate_on_submit():
+        now = jamaica_now()
+        sample.marked_oos_at = now
+        sample.marked_oos_by = current_user.id
+        sample.oos_mark_reason = form.reason.data
+
+        _add_history(
+            sample, 'Marked Out of Spec',
+            f'Marked out of spec by {current_user.full_name}: {form.reason.data}',
+            action_type='Mark Out of Spec',
+            object_affected='Sample',
+            change_description=form.reason.data,
+        )
+        db.session.add(AuditLog(
+            action='SAMPLE_MARK_OUT_OF_SPEC',
+            entity_type='Sample',
+            entity_id=sample.id,
+            entity_label=sample.lab_number,
+            details=f'Reason: {form.reason.data}',
+            performed_by=current_user.id,
+        ))
+        db.session.commit()
+        notify_marked_out_of_spec(sample)
+        flash('Sample marked as out of spec.', 'success')
+        return redirect(url_for('samples.detail', sample_id=sample_id))
+
+    return render_template('samples/mark_out_of_spec.html', form=form, sample=sample)
 
 
 # ---------------------------------------------------------------------------

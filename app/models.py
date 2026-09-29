@@ -154,6 +154,7 @@ ROLE_INHERENT_PERMISSIONS: dict['Role', set['Permission']] = {
         Permission.COA_DECERTIFY_REISSUE,
         Permission.SUBMIT_REPORT,
         Permission.VIEW_ALL_PRELIMINARY_REVIEWS,
+        Permission.OOS_FLAG,
     },
     Role.SENIOR_CHEMIST: {
         Permission.REGISTER_SAMPLE,
@@ -164,6 +165,7 @@ ROLE_INHERENT_PERMISSIONS: dict['Role', set['Permission']] = {
         Permission.TECHNICAL_REVIEW,
         Permission.MULTI_ANALYST_ASSIGN,
         Permission.VIEW_TEAM_PRELIMINARY_REVIEWS,
+        Permission.OOS_FLAG,
     },
     Role.OFFICER: {
         Permission.REGISTER_SAMPLE,
@@ -901,6 +903,15 @@ class Sample(db.Model):
     hod_return_reason = db.Column(db.Text, nullable=True)
     returned_by_hod_at = db.Column(db.DateTime, nullable=True)
 
+    # Post-certification Out-of-Spec flag – allows HOD, Deputy, or Senior
+    # Chemist (permission-based via Permission.OOS_FLAG) to flag a sample
+    # as out-of-spec after it has already been certified.
+    marked_oos_at = db.Column(db.DateTime, nullable=True)
+    marked_oos_by = db.Column(
+        db.Integer, db.ForeignKey('users.id'), nullable=True
+    )
+    oos_mark_reason = db.Column(db.Text, nullable=True)
+
     # Relationships
     assignments = db.relationship(
         'SampleAssignment', backref='sample', lazy='dynamic',
@@ -930,6 +941,9 @@ class Sample(db.Model):
     )
     reissuer = db.relationship(
         'User', foreign_keys=[reissued_by]
+    )
+    oos_marker = db.relationship(
+        'User', foreign_keys=[marked_oos_by]
     )
     comments = db.relationship(
         'SampleComment', backref='sample', lazy='dynamic',

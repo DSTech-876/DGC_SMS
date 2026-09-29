@@ -1245,6 +1245,15 @@ class COAReissueForm(FlaskForm):
     submit = SubmitField('Re-Issue Certificate')
 
 
+class MarkOutOfSpecForm(FlaskForm):
+    """HOD / Deputy / Senior Chemist marks a certified sample as out of specification."""
+    reason = TextAreaField(
+        'Reason for Out-of-Spec Determination',
+        validators=[DataRequired(message='Please provide a reason.'), Length(max=1000)],
+    )
+    submit = SubmitField('Mark as Out of Spec')
+
+
 # ---------------------------------------------------------------------------
 # Invoice (Feature 9)
 # ---------------------------------------------------------------------------

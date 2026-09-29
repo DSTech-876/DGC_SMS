@@ -2915,3 +2915,145 @@ def test_upload_and_delete_sample_image(app, client):
     assert resp.status_code == 200
     with app.app_context():
         assert SampleImage.query.filter_by(sample_id=sid).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Post-Certification Out-of-Spec Marking
+# ---------------------------------------------------------------------------
+
+def test_mark_out_of_spec_denied_without_permission(app, client):
+    """A chemist without HOD/Deputy/Senior Chemist role or OOS_FLAG permission is denied."""
+    officer_id, sc_id, chemist_id, deputy_id, hod_id = _setup_users(app)
+    sid = _create_sample_direct(
+        app, uploaded_by=officer_id, lab_number='PH/OOS1',
+        status=SampleStatus.CERTIFIED,
+    )
+
+    _login(client, 'chemist')
+    resp = client.post(f'/samples/{sid}/mark-out-of-spec', data={
+        'reason': 'Failed re-test.',
+    }, follow_redirects=True)
+    assert resp.status_code == 200
+    with app.app_context():
+        sample = db.session.get(Sample, sid)
+        assert sample.marked_oos_at is None
+
+
+def test_mark_out_of_spec_by_hod(app, client):
+    """HOD can mark a certified sample as out of spec."""
+    officer_id, *_ = _setup_users(app)
+    sid = _create_sample_direct(
+        app, uploaded_by=officer_id, lab_number='PH/OOS2',
+        status=SampleStatus.CERTIFIED,
+    )
+
+    _login(client, 'hod')
+    resp = client.post(f'/samples/{sid}/mark-out-of-spec', data={
+        'reason': 'Confirmed failing result on retest.',
+    }, follow_redirects=True)
+    assert resp.status_code == 200
+    with app.app_context():
+        sample = db.session.get(Sample, sid)
+        assert sample.marked_oos_at is not None
+        assert sample.oos_mark_reason == 'Confirmed failing result on retest.'
+        # Status remains Certified – marking OOS does not revert the workflow.
+        assert sample.status == SampleStatus.CERTIFIED
+
+
+def test_mark_out_of_spec_by_deputy(app, client):
+    """Deputy can mark a certified sample as out of spec (role-based)."""
+    officer_id, *_ = _setup_users(app)
+    sid = _create_sample_direct(
+        app, uploaded_by=officer_id, lab_number='PH/OOS3',
+        status=SampleStatus.CERTIFIED,
+    )
+
+    _login(client, 'deputy')
+    resp = client.post(f'/samples/{sid}/mark-out-of-spec', data={
+        'reason': 'OOS confirmed by Deputy.',
+    }, follow_redirects=True)
+    assert resp.status_code == 200
+    with app.app_context():
+        sample = db.session.get(Sample, sid)
+        assert sample.marked_oos_at is not None
+
+
+def test_mark_out_of_spec_by_senior_chemist(app, client):
+    """Senior Chemist can mark a certified sample as out of spec (role-based)."""
+    officer_id, *_ = _setup_users(app)
+    sid = _create_sample_direct(
+        app, uploaded_by=officer_id, lab_number='PH/OOS4',
+        status=SampleStatus.CERTIFIED,
+    )
+
+    _login(client, 'senior')
+    resp = client.post(f'/samples/{sid}/mark-out-of-spec', data={
+        'reason': 'OOS confirmed by Senior Chemist.',
+    }, follow_redirects=True)
+    assert resp.status_code == 200
+    with app.app_context():
+        sample = db.session.get(Sample, sid)
+        assert sample.marked_oos_at is not None
+
+
+def test_mark_out_of_spec_with_explicit_permission_grant(app, client):
+    """A user without a qualifying role can act if explicitly granted OOS_FLAG."""
+    officer_id, *_ = _setup_users(app)
+    from app.models import user_permissions
+    with app.app_context():
+        db.session.execute(
+            user_permissions.insert().values(
+                user_id=officer_id, permission=Permission.OOS_FLAG
+            )
+        )
+        db.session.commit()
+
+    sid = _create_sample_direct(
+        app, uploaded_by=officer_id, lab_number='PH/OOS5',
+        status=SampleStatus.CERTIFIED,
+    )
+
+    _login(client, 'officer')
+    resp = client.post(f'/samples/{sid}/mark-out-of-spec', data={
+        'reason': 'OOS confirmed via granted permission.',
+    }, follow_redirects=True)
+    assert resp.status_code == 200
+    with app.app_context():
+        sample = db.session.get(Sample, sid)
+        assert sample.marked_oos_at is not None
+
+
+def test_mark_out_of_spec_requires_certified_status(app, client):
+    """Only certified samples can be marked out of spec."""
+    officer_id, *_ = _setup_users(app)
+    sid = _create_sample_direct(
+        app, uploaded_by=officer_id, lab_number='PH/OOS6',
+        status=SampleStatus.IN_PROGRESS,
+    )
+
+    _login(client, 'hod')
+    resp = client.post(f'/samples/{sid}/mark-out-of-spec', data={
+        'reason': 'Attempted early mark.',
+    }, follow_redirects=True)
+    assert resp.status_code == 200
+    with app.app_context():
+        sample = db.session.get(Sample, sid)
+        assert sample.marked_oos_at is None
+
+
+def test_mark_out_of_spec_shows_badge_on_detail_page(app, client):
+    """Once marked, the detail page shows an Out of Spec badge."""
+    officer_id, *_ = _setup_users(app)
+    sid = _create_sample_direct(
+        app, uploaded_by=officer_id, lab_number='PH/OOS7',
+        status=SampleStatus.CERTIFIED,
+    )
+
+    _login(client, 'hod')
+    client.post(f'/samples/{sid}/mark-out-of-spec', data={
+        'reason': 'Confirmed OOS.',
+    }, follow_redirects=True)
+
+    resp = client.get(f'/samples/{sid}')
+    assert resp.status_code == 200
+    assert b'Out of Spec' in resp.data

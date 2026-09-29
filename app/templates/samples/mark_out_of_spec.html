@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Mark Out of Spec – {{ sample.lab_number }} - DGC SMS{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2><i class="bi bi-exclamation-octagon text-danger"></i> Mark Out of Spec: {{ sample.lab_number }}</h2>
+    <a href="{{ url_for('samples.detail', sample_id=sample.id) }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left me-1"></i>Back
+    </a>
+</div>
+
+<div class="row justify-content-center">
+    <div class="col-lg-7">
+        <div class="alert alert-danger">
+            <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>Warning:</strong>
+            This will flag the certified sample as Out of Specification.
+            An audit trail entry will be created and relevant staff will be notified.
+            Only HOD, Deputy Government Chemist, or Senior Chemist can perform this action.
+        </div>
+        <div class="card mb-3">
+            <div class="card-body py-2 px-3">
+                <span class="text-muted small">
+                    {{ sample.sample_name }} &mdash;
+                    <span class="badge bg-info text-dark">{{ sample.sample_type.value }}</span>
+                    &mdash; Certified
+                    {% if sample.certified_at %}on {{ sample.certified_at.strftime('%d %b %Y %H:%M') }}{% endif %}
+                    {% if sample.coa_reference %}
+                    &mdash; Ref: <strong>{{ sample.coa_reference }}</strong>
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-body p-4">
+                <form method="POST">
+                    {{ form.hidden_tag() }}
+                    <div class="mb-3">
+                        {{ form.reason.label(class="form-label fw-semibold") }}
+                        {{ form.reason(class="form-control", rows=4,
+                            placeholder="Provide a clear reason for the out-of-spec determination…") }}
+                        {% for error in form.reason.errors %}
+                        <div class="invalid-feedback d-block">{{ error }}</div>
+                        {% endfor %}
+                    </div>
+                    <div class="d-flex gap-2">
+                        {{ form.submit(class="btn btn-danger") }}
+                        <a href="{{ url_for('samples.detail', sample_id=sample.id) }}"
+                           class="btn btn-outline-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
