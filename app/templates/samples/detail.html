@@ -146,6 +146,14 @@
     {% if sample.coa_version and sample.coa_version > 1 %}
     <span class="badge bg-warning text-dark ms-2">Re-issued v{{ sample.coa_version }}</span>
     {% endif %}
+    {% if sample.marked_oos_at %}
+    <span class="badge bg-danger ms-2">Out of Spec</span>
+    <br><small>
+        Marked by {{ sample.oos_marker.full_name if sample.oos_marker else 'N/A' }}
+        on {{ sample.marked_oos_at.strftime('%d %b %Y %H:%M') }}.
+        {% if sample.oos_mark_reason %}Reason: {{ sample.oos_mark_reason }}{% endif %}
+    </small>
+    {% endif %}
     {% if current_user.has_any_role(Role.HOD, Role.ADMIN) or current_user.has_permission(Permission.COA_DECERTIFY_REISSUE) %}
     <div class="mt-2 d-flex gap-2 flex-wrap">
         <a href="{{ url_for('samples.coa_decertify', sample_id=sample.id) }}"
@@ -162,6 +170,17 @@
         </a>
     </div>
     {% endif %}
+    {% if not sample.marked_oos_at and (
+            current_user.has_any_role(Role.HOD, Role.DEPUTY, Role.SENIOR_CHEMIST, Role.ADMIN)
+            or current_user.has_permission(Permission.OOS_FLAG)) %}
+    <div class="mt-2 d-flex gap-2 flex-wrap">
+        <a href="{{ url_for('samples.mark_out_of_spec', sample_id=sample.id) }}"
+           class="btn btn-outline-danger btn-sm">
+            <i class="bi bi-exclamation-octagon me-1"></i>Mark Out of Spec
+        </a>
+    </div>
+    {% endif %}
+</div>
 </div>
 {% endif %}
 

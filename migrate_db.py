@@ -145,6 +145,10 @@ MIGRATIONS = [
     ('samples', 'is_accredited', 'BOOLEAN'),
     # Resubmission type classification (which review stage triggered the resubmission)
     ('document_versions', 'resubmission_type', 'VARCHAR(50)'),
+    # Post-certification Out-of-Spec marking (HOD / Deputy / Senior Chemist)
+    ('samples', 'marked_oos_at', 'DATETIME'),
+    ('samples', 'marked_oos_by', 'INTEGER REFERENCES users(id)'),
+    ('samples', 'oos_mark_reason', 'TEXT'),
 ]
 
 NEW_TABLES = [
